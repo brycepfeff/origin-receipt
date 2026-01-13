@@ -11,7 +11,7 @@ export default function Page() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  // Stable mock values for the preview card (no hydration issues)
+  // Stable preview values (avoid hydration mismatch)
   const mockHash = useMemo(
     () => "b3d7c9f0a0e1c2d3f4a5b6c7d8e9f00112233445566778899aabbccddeeff00",
     []
@@ -22,6 +22,7 @@ export default function Page() {
   );
   const mockId = useMemo(() => "or_" + mockHash.slice(0, 12), [mockHash]);
 
+  // Timestamp must be client-generated
   const [ts, setTs] = useState("—");
   useEffect(() => {
     const now = new Date();
@@ -50,7 +51,8 @@ export default function Page() {
   }
 
   async function onGenerate() {
-    if (!file) return;
+    if (!file || busy) return;
+
     setBusy(true);
     setError("");
 
@@ -69,10 +71,21 @@ export default function Page() {
         throw new Error(data?.error || data?.details || "Failed to generate receipt");
       }
 
-      const url = data?.url;
-      if (!url) throw new Error("Missing receipt URL from server");
+      // Robust: accept multiple response shapes
+      const id =
+        data?.receipt?.id ||
+        data?.id ||
+        data?.receiptId ||
+        data?.result?.id ||
+        null;
 
-      window.location.href = url;
+      if (!id || typeof id !== "string") {
+        console.log("API response (missing id):", data);
+        throw new Error("Server did not return a receipt id");
+      }
+
+      // Always navigate to /r/{id}
+      window.location.href = `/r/${id}`;
     } catch (e) {
       setError(e?.message || "Something went wrong");
     } finally {
@@ -145,7 +158,7 @@ export default function Page() {
               <Row k="Fingerprint" v={shortHash} mono />
               <div className="divider" />
               <div className="receiptNote">
-                This preview shows the exact format. Now the demo below generates real receipts.
+                Preview format. The demo below generates a real receipt stored in Postgres.
               </div>
             </div>
 
@@ -226,7 +239,7 @@ export default function Page() {
                   <div className="metaBox metaMuted">
                     <div className="metaTitle">Tip</div>
                     <div className="metaValue">Short clips upload faster for demos.</div>
-                    <div className="metaHint">We can add max-size + progress later.</div>
+                    <div className="metaHint">We can add progress + max-size later.</div>
                   </div>
                 )}
 
@@ -246,7 +259,7 @@ export default function Page() {
             <div className="panelHead" id="verify">
               <h2 className="h2">Verify a receipt</h2>
               <p className="p">
-                For now: use the receipt URL like <span className="mono">/r/or_abc...</span>
+                MVP: open the receipt URL like <span className="mono">/r/or_abc...</span>
               </p>
             </div>
 
@@ -254,8 +267,7 @@ export default function Page() {
               <div className="callout">
                 <div className="calloutTitle">Pitch line</div>
                 <div className="calloutText">
-                  “We do not guess what is authentic. We issue a receipt the moment a file exists,
-                  then anyone can verify it later.”
+                  “We issue a receipt at the moment a file exists. Anyone can verify it later.”
                 </div>
               </div>
 
@@ -270,8 +282,8 @@ export default function Page() {
           <h2 className="h2">How it works</h2>
           <div className="steps">
             <Step n="1" title="Fingerprint" desc="We hash the file so any change becomes detectable." />
-            <Step n="2" title="Receipt" desc="We store a timestamped receipt that can be referenced later." />
-            <Step n="3" title="Verify" desc="Anyone can open the receipt link and verify it exists." />
+            <Step n="2" title="Receipt" desc="We store a timestamped receipt for later reference." />
+            <Step n="3" title="Verify" desc="Anyone can open the receipt link and confirm it exists." />
           </div>
         </section>
 

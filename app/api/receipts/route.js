@@ -42,14 +42,12 @@ export async function POST(request) {
     const contentHash = sha256Hex(buf);
     const id = makeIdFromHash(contentHash);
 
-    // Insert if not exists (id deterministic from file hash)
     await sql`
       INSERT INTO receipts (id, content_hash, filename, mime, size_bytes)
       VALUES (${id}, ${contentHash}, ${file.name ?? null}, ${file.type ?? null}, ${buf.length})
       ON CONFLICT (id) DO NOTHING;
     `;
 
-    // Fetch receipt (for created_at)
     const { rows } = await sql`
       SELECT id, content_hash, created_at, filename, mime, size_bytes
       FROM receipts
@@ -60,6 +58,8 @@ export async function POST(request) {
     const r = rows?.[0];
     return new Response(
       JSON.stringify({
+        // return BOTH "id" and "receipt.id" so the frontend always finds it
+        id: r.id,
         receipt: {
           id: r.id,
           contentHash: r.content_hash,
@@ -68,7 +68,6 @@ export async function POST(request) {
           mime: r.mime,
           sizeBytes: Number(r.size_bytes ?? 0),
         },
-        url: `/r/${id}`,
       }),
       { status: 200, headers: { "content-type": "application/json" } }
     );

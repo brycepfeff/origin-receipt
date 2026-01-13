@@ -1,4 +1,4 @@
-import { headers } from "next/headers";
+import { sql } from "@vercel/postgres";
 
 export const dynamic = "force-dynamic";
 
@@ -7,43 +7,51 @@ function shortHash(h) {
   return `${h.slice(0, 10)}…${h.slice(-10)}`;
 }
 
-function getBaseUrlFromHeaders() {
-  const h = headers();
-  const host = h.get("x-forwarded-host") || h.get("host");
-  const proto = h.get("x-forwarded-proto") || "http";
-  if (!host) return null;
-  return `${proto}://${host}`;
+async function ensureTable() {
+  await sql`
+    CREATE TABLE IF NOT EXISTS receipts (
+      id TEXT PRIMARY KEY,
+      content_hash TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      filename TEXT,
+      mime TEXT,
+      size_bytes BIGINT
+    );
+  `;
 }
 
 export default async function ReceiptPage({ params }) {
-  const id = params?.id;
+  // Next 16: params can be a Promise
+  const resolved = await params;
+  const id = resolved?.id;
 
-  // Guard: if the route param is missing, show a clean message
   if (!id) {
     return (
       <div className="shell">
         <div className="bg" aria-hidden="true" />
         <div className="noise" aria-hidden="true" />
         <main className="main">
-          <div className="panel">
+          <section className="panel">
             <div className="panelHead">
               <h1 className="h2">Receipt</h1>
               <p className="p">Missing receipt id in URL.</p>
             </div>
-          </div>
+          </section>
         </main>
       </div>
     );
   }
 
-  const baseUrl = getBaseUrlFromHeaders();
-  const apiUrl = baseUrl ? `${baseUrl}/api/receipts/${id}` : null;
+  await ensureTable();
 
-  let data = null;
-  if (apiUrl) {
-    const res = await fetch(apiUrl, { cache: "no-store" });
-    if (res.ok) data = await res.json();
-  }
+  const { rows } = await sql`
+    SELECT id, content_hash, created_at, filename, mime, size_bytes
+    FROM receipts
+    WHERE id = ${id}
+    LIMIT 1;
+  `;
+
+  const r = rows?.[0] || null;
 
   return (
     <div className="shell">
@@ -78,7 +86,7 @@ export default async function ReceiptPage({ params }) {
           </div>
 
           <div className="verifyBox">
-            {!data ? (
+            {!r ? (
               <div className="callout">
                 <div className="calloutTitle">Not found</div>
                 <div className="calloutText">
@@ -90,48 +98,54 @@ export default async function ReceiptPage({ params }) {
                 <div className="callout">
                   <div className="calloutTitle">Verified receipt</div>
                   <div className="calloutText">
-                    Receipt ID <span className="mono">{data.id}</span> exists in our database.
+                    Receipt ID <span className="mono">{r.id}</span> exists in the database.
                   </div>
                 </div>
 
                 <div className="receipt" style={{ padding: 0 }}>
                   <div className="row">
                     <div className="rowKey">Receipt ID</div>
-                    <div className="rowVal mono">{data.id}</div>
+                    <div className="rowVal mono">{r.id}</div>
                   </div>
 
                   <div className="row">
                     <div className="rowKey">Timestamp</div>
                     <div className="rowVal mono">
-                      {new Date(data.createdAt).toISOString().replace("T", " ").replace("Z", " UTC")}
+                      {new Date(r.created_at).toISOString().replace("T", " ").replace("Z", " UTC")}
                     </div>
                   </div>
 
                   <div className="row">
                     <div className="rowKey">Fingerprint</div>
-                    <div className="rowVal mono" title={data.contentHash}>
-                      {shortHash(data.contentHash)}
+                    <div
+                      className="rowVal mono"
+                      title={r.content_hash}
+                    >
+                      {shortHash(r.content_hash)}
                     </div>
                   </div>
 
                   <div className="row">
                     <div className="rowKey">Filename</div>
-                    <div className="rowVal">{data.filename || "—"}</div>
+                    <div className="rowVal">{r.filename || "—"}</div>
                   </div>
 
                   <div className="row">
                     <div className="rowKey">Type</div>
-                    <div className="rowVal">{data.mime || "—"}</div>
+                    <div className="rowVal">{r.mime || "—"}</div>
                   </div>
 
                   <div className="row">
                     <div className="rowKey">Size</div>
-                    <div className="rowVal">{Number(data.sizeBytes || 0).toLocaleString()} bytes</div>
+                    <div className="rowVal">
+                      {Number(r.size_bytes || 0).toLocaleString()} bytes
+                    </div>
                   </div>
 
                   <div className="divider" />
+
                   <div className="receiptNote">
-                    Next: add “Verify by re-upload” to recompute hash and compare.
+                    Next step: “Verify by re-upload” to recompute hash and compare.
                   </div>
                 </div>
               </>
