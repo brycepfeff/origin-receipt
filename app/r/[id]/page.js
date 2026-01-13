@@ -1,3 +1,5 @@
+import { headers } from "next/headers";
+
 export const dynamic = "force-dynamic";
 
 function shortHash(h) {
@@ -5,15 +7,43 @@ function shortHash(h) {
   return `${h.slice(0, 10)}…${h.slice(-10)}`;
 }
 
+function getBaseUrlFromHeaders() {
+  const h = headers();
+  const host = h.get("x-forwarded-host") || h.get("host");
+  const proto = h.get("x-forwarded-proto") || "http";
+  if (!host) return null;
+  return `${proto}://${host}`;
+}
+
 export default async function ReceiptPage({ params }) {
   const id = params?.id;
 
-  const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || ""}/api/receipts/${id}`, {
-    cache: "no-store",
-  });
+  // Guard: if the route param is missing, show a clean message
+  if (!id) {
+    return (
+      <div className="shell">
+        <div className="bg" aria-hidden="true" />
+        <div className="noise" aria-hidden="true" />
+        <main className="main">
+          <div className="panel">
+            <div className="panelHead">
+              <h1 className="h2">Receipt</h1>
+              <p className="p">Missing receipt id in URL.</p>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  const baseUrl = getBaseUrlFromHeaders();
+  const apiUrl = baseUrl ? `${baseUrl}/api/receipts/${id}` : null;
 
   let data = null;
-  if (res.ok) data = await res.json();
+  if (apiUrl) {
+    const res = await fetch(apiUrl, { cache: "no-store" });
+    if (res.ok) data = await res.json();
+  }
 
   return (
     <div className="shell">
@@ -69,35 +99,39 @@ export default async function ReceiptPage({ params }) {
                     <div className="rowKey">Receipt ID</div>
                     <div className="rowVal mono">{data.id}</div>
                   </div>
+
                   <div className="row">
                     <div className="rowKey">Timestamp</div>
                     <div className="rowVal mono">
                       {new Date(data.createdAt).toISOString().replace("T", " ").replace("Z", " UTC")}
                     </div>
                   </div>
+
                   <div className="row">
                     <div className="rowKey">Fingerprint</div>
                     <div className="rowVal mono" title={data.contentHash}>
                       {shortHash(data.contentHash)}
                     </div>
                   </div>
+
                   <div className="row">
                     <div className="rowKey">Filename</div>
                     <div className="rowVal">{data.filename || "—"}</div>
                   </div>
+
                   <div className="row">
                     <div className="rowKey">Type</div>
                     <div className="rowVal">{data.mime || "—"}</div>
                   </div>
+
                   <div className="row">
                     <div className="rowKey">Size</div>
                     <div className="rowVal">{Number(data.sizeBytes || 0).toLocaleString()} bytes</div>
                   </div>
 
                   <div className="divider" />
-
                   <div className="receiptNote">
-                    Next step: add “Verify by re-upload” to recompute the hash and compare.
+                    Next: add “Verify by re-upload” to recompute hash and compare.
                   </div>
                 </div>
               </>
