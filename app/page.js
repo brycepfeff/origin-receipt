@@ -3,11 +3,15 @@
 import { useEffect, useMemo, useState } from "react";
 
 export default function Page() {
+  const [file, setFile] = useState(null);
   const [fileName, setFileName] = useState("");
   const [fileSize, setFileSize] = useState("");
   const [dragOver, setDragOver] = useState(false);
 
-  // Stable mock values (safe for SSR)
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  // Stable mock values for the preview card (no hydration issues)
   const mockHash = useMemo(
     () => "b3d7c9f0a0e1c2d3f4a5b6c7d8e9f00112233445566778899aabbccddeeff00",
     []
@@ -18,21 +22,23 @@ export default function Page() {
   );
   const mockId = useMemo(() => "or_" + mockHash.slice(0, 12), [mockHash]);
 
-  // Timestamp must be client-generated to avoid hydration mismatch
   const [ts, setTs] = useState("—");
-
   useEffect(() => {
     const now = new Date();
-    const iso = now.toISOString();
-    const formatted = iso.replace("T", " ").replace("Z", " UTC");
-    setTs(formatted);
+    setTs(now.toISOString().replace("T", " ").replace("Z", " UTC"));
   }, []);
+
+  function setPickedFile(f) {
+    setError("");
+    setFile(f);
+    setFileName(f?.name || "");
+    setFileSize(f ? formatBytes(f.size) : "");
+  }
 
   function onPickFile(e) {
     const f = e.target.files?.[0];
     if (!f) return;
-    setFileName(f.name);
-    setFileSize(formatBytes(f.size));
+    setPickedFile(f);
   }
 
   function onDrop(e) {
@@ -40,8 +46,38 @@ export default function Page() {
     setDragOver(false);
     const f = e.dataTransfer.files?.[0];
     if (!f) return;
-    setFileName(f.name);
-    setFileSize(formatBytes(f.size));
+    setPickedFile(f);
+  }
+
+  async function onGenerate() {
+    if (!file) return;
+    setBusy(true);
+    setError("");
+
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+
+      const res = await fetch("/api/receipts", {
+        method: "POST",
+        body: fd,
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        throw new Error(data?.error || data?.details || "Failed to generate receipt");
+      }
+
+      const url = data?.url;
+      if (!url) throw new Error("Missing receipt URL from server");
+
+      window.location.href = url;
+    } catch (e) {
+      setError(e?.message || "Something went wrong");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -109,7 +145,7 @@ export default function Page() {
               <Row k="Fingerprint" v={shortHash} mono />
               <div className="divider" />
               <div className="receiptNote">
-                This is a preview UI. Next we will generate real hashes and real receipt links.
+                This preview shows the exact format. Now the demo below generates real receipts.
               </div>
             </div>
 
@@ -129,9 +165,7 @@ export default function Page() {
           <div className="panel">
             <div className="panelHead">
               <h2 className="h2">Generate a receipt</h2>
-              <p className="p">
-                Drag a video or image below. Backend comes next. UI is wired for it already.
-              </p>
+              <p className="p">Upload a file to create a real receipt link.</p>
             </div>
 
             <div
@@ -148,7 +182,7 @@ export default function Page() {
               </div>
               <div className="dropText">
                 <div className="dropTitle">Drop your file here</div>
-                <div className="dropSub">MP4, MOV, JPG, PNG. Up to whatever we set later.</div>
+                <div className="dropSub">MP4, MOV, JPG, PNG.</div>
               </div>
 
               <div className="dropActions">
@@ -161,10 +195,23 @@ export default function Page() {
                     onChange={onPickFile}
                   />
                 </label>
-                <button className="button buttonGhost buttonWide" type="button" disabled>
-                  Generate receipt
+
+                <button
+                  className="button buttonGhost buttonWide"
+                  type="button"
+                  onClick={onGenerate}
+                  disabled={!file || busy}
+                >
+                  {busy ? "Generating…" : "Generate receipt"}
                 </button>
               </div>
+
+              {error ? (
+                <div className="callout" style={{ marginTop: 10 }}>
+                  <div className="calloutTitle">Error</div>
+                  <div className="calloutText">{error}</div>
+                </div>
+              ) : null}
 
               <div className="dropMeta">
                 {fileName ? (
@@ -178,17 +225,17 @@ export default function Page() {
                 ) : (
                   <div className="metaBox metaMuted">
                     <div className="metaTitle">Tip</div>
-                    <div className="metaValue">Start with a short clip for the demo.</div>
-                    <div className="metaHint">We will optimize uploads next.</div>
+                    <div className="metaValue">Short clips upload faster for demos.</div>
+                    <div className="metaHint">We can add max-size + progress later.</div>
                   </div>
                 )}
 
                 <div className="metaBox">
                   <div className="metaTitle">What you get</div>
                   <ul className="metaList">
-                    <li>Fingerprint (hash)</li>
+                    <li>SHA-256 fingerprint</li>
                     <li>Timestamped receipt</li>
-                    <li>Shareable verification link</li>
+                    <li>Public receipt page</li>
                   </ul>
                 </div>
               </div>
@@ -199,37 +246,22 @@ export default function Page() {
             <div className="panelHead" id="verify">
               <h2 className="h2">Verify a receipt</h2>
               <p className="p">
-                Investors love this because it is dead simple: paste a receipt ID, confirm match.
+                For now: use the receipt URL like <span className="mono">/r/or_abc...</span>
               </p>
             </div>
 
             <div className="verifyBox">
-              <label className="field">
-                <span className="fieldLabel">Receipt ID</span>
-                <input
-                  className="input"
-                  placeholder="or_b3d7c9f0a0e1"
-                  inputMode="text"
-                  autoComplete="off"
-                />
-              </label>
-
-              <label className="field">
-                <span className="fieldLabel">Optional: re-upload file to compare</span>
-                <input className="input" type="file" accept="video/*,image/*" disabled />
-              </label>
-
-              <button className="button buttonPrimary" type="button" disabled>
-                Verify
-              </button>
-
               <div className="callout">
                 <div className="calloutTitle">Pitch line</div>
                 <div className="calloutText">
-                  “We do not guess what is authentic. We issue a receipt at the moment the file
-                  exists, then anyone can verify it later.”
+                  “We do not guess what is authentic. We issue a receipt the moment a file exists,
+                  then anyone can verify it later.”
                 </div>
               </div>
+
+              <a className="button buttonPrimary" href="#demo">
+                Generate a receipt
+              </a>
             </div>
           </div>
         </section>
@@ -239,14 +271,14 @@ export default function Page() {
           <div className="steps">
             <Step n="1" title="Fingerprint" desc="We hash the file so any change becomes detectable." />
             <Step n="2" title="Receipt" desc="We store a timestamped receipt that can be referenced later." />
-            <Step n="3" title="Verify" desc="Anyone can verify the receipt and confirm file match." />
+            <Step n="3" title="Verify" desc="Anyone can open the receipt link and verify it exists." />
           </div>
         </section>
 
         <footer className="footer">
           <div className="footerLeft">
             <div className="brandNameSmall">Origin Receipt</div>
-            <div className="footerNote">MVP UI. Backend next.</div>
+            <div className="footerNote">MVP: hash + timestamp + receipt page</div>
           </div>
           <div className="footerRight">
             <a className="navLink" href="#demo">
